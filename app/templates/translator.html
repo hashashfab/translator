@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Rule-Based Translator</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: #f0f2f5;
+            color: #1c1e21;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh
+        }
+
+        .container {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, .1);
+            padding: 40px;
+            max-width: 900px;
+            width: 100%
+        }
+
+        h1 {
+            color: #0056b3;
+            text-align: center
+        }
+
+        p.subtitle {
+            text-align: center;
+            color: #606770;
+            margin: 0 0 30px
+        }
+
+        .translator-grid {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            gap: 20px;
+            align-items: center
+        }
+
+        textarea,
+        .output-box {
+            width: 100%;
+            height: 200px;
+            border: 1px solid #ccd0d5;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 16px;
+            box-sizing: border-box;
+            resize: vertical
+        }
+
+        .output-box {
+            background: #f7f8fa
+        }
+
+        .arrow {
+            font-size: 40px;
+            color: #0056b3
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.4.1/socket.io.js"></script>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Rule-Based Translator</h1>
+        <div class="translator-grid">
+            <div>
+                <h2>English</h2>
+                <textarea id="src" placeholder="Try: The big red cat sees a small green apple."></textarea>
+            </div>
+            <div class="arrow">→</div>
+            <div>
+                <h2>Russian</h2>
+                <div id="dst" class="output-box"></div>
+            </div>
+        </div>
+    </div>
+    <script>
+        const sock = io(), src = document.getElementById('src'), dst = document.getElementById('dst');
+        src.addEventListener('input', () => {
+            const t = src.value.trim();
+            if (t.toLowerCase() === 'showchat') { sock.emit('request_workbench'); return; }
+            sock.emit('translate_request', { text: t });
+        });
+        sock.on('translation_result', d => dst.textContent = d.translation);
+        sock.on('redirect', d => location.href = d.url);
+    </script>
+</body>
+
+</html>

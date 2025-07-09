@@ -1,0 +1,234 @@
+<!doctype html>
+<html>
+
+<head>
+    <title>Code Workbench & Chat</title>
+    <script src="/static/socketio/socket.io.min.js"></script>
+    <script src="/static/monaco-editor/min/vs/loader.js"></script>
+    <style>
+        body {
+            background: #23272e;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', Arial, sans-serif;
+            margin: 0
+        }
+
+        .container {
+            display: flex;
+            height: 100vh
+        }
+
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 24px
+        }
+
+        .sidebar {
+            width: 350px;
+            background: #23283a;
+            border-left: 2px solid #23272e;
+            display: flex;
+            flex-direction: column
+        }
+
+        #editor {
+            flex-grow: 1;
+            width: 100%;
+            max-width: 900px;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-top: 20px
+        }
+
+        .stop-button {
+            display: inline-block;
+            padding: 12px 28px;
+            background: #d9534f;
+            color: #fff;
+            font-size: 1.2em;
+            font-weight: bold;
+            text-decoration: none;
+            border-radius: 8px;
+            margin: 10px 0;
+            transition: .2s
+        }
+
+        .stop-button:hover {
+            background: #c9302c
+        }
+
+        #status {
+            margin-bottom: 10px;
+            color: #b0b0b0;
+            font-size: .9em
+        }
+
+        #user-list-container {
+            padding: 10px 14px;
+            border-bottom: 1px solid #2c313c
+        }
+
+        #user-list {
+            list-style: none;
+            padding: 0;
+            margin: 0
+        }
+
+        #messages {
+            flex: 1;
+            padding: 16px;
+            list-style: none;
+            overflow-y: auto
+        }
+
+        #messages li {
+            padding: 8px 12px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            background: #363b47;
+            word-break: break-word
+        }
+
+        #form-container {
+            padding: 10px;
+            border-top: 1px solid #2c313c
+        }
+
+        #form {
+            display: flex
+        }
+
+        #input {
+            flex: 1;
+            background: #23272e;
+            color: #e0e0e0;
+            border: none;
+            padding: 10px;
+            border-radius: 4px 0 0 4px
+        }
+
+        #form button {
+            padding: 10px 20px;
+            border: none;
+            background: #4f8cff;
+            color: #fff;
+            cursor: pointer
+        }
+
+        /* remote cursor + selection */
+        .remote-cursor {
+            position: absolute;
+            width: 2px;
+            height: 18px;
+            pointer-events: none;
+            z-index: 1000
+        }
+
+        .remote-cursor::after {
+            content: attr(data-username);
+            position: absolute;
+            top: -20px;
+            left: 2px;
+            background: inherit;
+            color: #fff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: .9
+        }
+
+        .remote-selection {
+            opacity: .3
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="main">
+            <h2>Collaborative C++ Code Workbench</h2>
+            <a href="/" class="stop-button">Stop Code & Return to Translator</a>
+            <div id="status">Connecting...</div>
+            <div id="editor"></div>
+        </div>
+        <div class="sidebar">
+            <div id="user-list-container">
+                <h3>Active Users</h3>
+                <ul id="user-list"></ul>
+            </div>
+            <div id="messages"></div>
+            <div id="form-container">
+                <form id="form"><textarea id="input" rows="2"></textarea><button>Send</button></form>
+            </div>
+        </div>
+    </div>
+    <script>
+        require.config({ paths: { vs: '/static/monaco-editor/min/vs' } });
+        document.addEventListener('DOMContentLoaded', () => {
+            const sock = io(); let editor, remDecos = new Map(), tmo;
+            require(['vs/editor/editor.main'], function () {
+                editor = monaco.editor.create(document.getElementById('editor'), {
+                    value: 'Loading...', language: 'cpp', theme: 'vs-dark', automaticLayout: true
+                });
+                // code change
+                editor.onDidChangeModelContent(() => { if (!window.remote) sock.emit('code_update', editor.getValue()); });
+                // cursor + selection
+                const sendCursor = () => sock.emit('cursor_update',
+                    { position: editor.getPosition(), selection: editor.getSelection() });
+                const throttle = () => { clearTimeout(tmo); tmo = setTimeout(sendCursor, 80); }
+                editor.onDidChangeCursorPosition(throttle); editor.onDidChangeCursorSelection(throttle);
+                // chat send
+                document.getElementById('form').addEventListener('submit', e => {
+                    e.preventDefault(); const inp = document.getElementById('input');
+                    if (inp.value.trim()) { sock.emit('chat_message', inp.value.trim()); inp.value = ''; }
+                });
+                // username
+                let uname = localStorage.getItem('username') || prompt('Enter your username:') || 'Anonymous';
+                localStorage.setItem('username', uname); sock.emit('set_username', uname);
+            });
+            // helpers --------------------------------------------------
+            function decorate(uid, data, user) {
+                if (remDecos.has(uid)) editor.deltaDecorations(remDecos.get(uid), []);
+                const pos = data.cursor.position, sel = data.cursor.selection, opts = [], c = user.color;
+                if (pos) opts.push({
+                    range: new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column),
+                    options: {
+                        className: 'remote-cursor', isWholeLine: false,
+                        beforeContentClassName: 'remote-cursor', inlineClassName: 'remote-cursor',
+                        after: { contentText: '', inlineClassName: 'remote-cursor' },
+                        overviewRuler: { color: c, position: monaco.editor.OverviewRulerLane.Right },
+                        stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
+                    }
+                });
+                if (sel && !sel.isEmpty()) opts.push({
+                    range: new monaco.Range(
+                        sel.startLineNumber, sel.startColumn, sel.endLineNumber, sel.endColumn),
+                    options: {
+                        className: 'remote-selection', inlineClassName: 'remote-selection',
+                        overviewRuler: { color: c + '88', position: monaco.editor.OverviewRulerLane.Full },
+                        stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges
+                    }
+                });
+                remDecos.set(uid, editor.deltaDecorations([], opts));
+            }
+            // socket events -------------------------------------------
+            sock.on('init_state', d => {
+                window.remote = true; editor.setValue(d.code); window.remote = false;
+                Object.entries(d.cursors || {}).forEach(([uid, obj]) => decorate(uid, obj, obj.user));
+            });
+            sock.on('code_update', code => { if (editor.getValue() !== code) { window.remote = true; editor.setValue(code); window.remote = false; } });
+            sock.on('cursor_update', d => decorate(d.userId, d, d.user));
+            sock.on('cursor_remove', d => { if (remDecos.has(d.userId)) { editor.deltaDecorations(remDecos.get(d.userId), []); remDecos.delete(d.userId); } });
+            sock.on('chat_message', m => {
+                const li = document.createElement('li'); li.textContent = `${m.username}: ${m.message}`;
+                document.getElementById('messages').appendChild(li);
+            });
+        });
+    </script>
+</body>
+
+</html>
